@@ -309,7 +309,7 @@ view { width, height, textures } =
                 , exposure = Scene3d.exposureValue 11
                 , toneMapping = Scene3d.hableFilmicToneMapping
                 , whiteBalance = Light.daylight
-                , background = Scene3d.transparentBackground
+                , background = Scene3d.backgroundColor Color.black
                 , entities =
                     [ -- Create a sphere entity in local sphere coordinates
                       Scene3d.sphere material sphere
