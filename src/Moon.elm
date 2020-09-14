@@ -9,6 +9,7 @@ camera).
 import Angle exposing (Angle)
 import Axis3d exposing (Axis3d)
 import Browser
+import Browser.Dom
 import Browser.Events
 import Camera3d exposing (Camera3d)
 import Color exposing (Color)
@@ -42,7 +43,14 @@ type SphereCoordinates
     = SphereCoordinates
 
 
-type Model
+type alias Model =
+    { width : Quantity Int Pixels -- Width of the browser window
+    , height : Quantity Int Pixels -- Height of the browser window
+    , textures : Textures
+    }
+
+
+type Textures
     = Loading
         { colorTexture : Maybe (Material.Texture Color)
         , roughnessTexture : Maybe (Material.Texture Float)
@@ -63,7 +71,8 @@ type Model
 
 
 type Msg
-    = GotColorTexture (Result WebGL.Texture.Error (Material.Texture Color))
+    = Resize (Quantity Int Pixels) (Quantity Int Pixels)
+    | GotColorTexture (Result WebGL.Texture.Error (Material.Texture Color))
     | GotRoughnessTexture (Result WebGL.Texture.Error (Material.Texture Float))
     | GotMetallicTexture (Result WebGL.Texture.Error (Material.Texture Float))
     | MouseDown
@@ -73,13 +82,24 @@ type Msg
 
 init : ( Model, Cmd Msg )
 init =
-    ( Loading
-        { colorTexture = Nothing
-        , roughnessTexture = Nothing
-        , metallicTexture = Nothing
-        }
+    ( { width = Quantity.zero
+      , height = Quantity.zero
+      , textures =
+            Loading
+                { colorTexture = Nothing
+                , roughnessTexture = Nothing
+                , metallicTexture = Nothing
+                }
+      }
     , Cmd.batch
-        [ Material.load "/static/level3.jpg"
+        [ Browser.Dom.getViewport
+            |> Task.perform
+                (\{ viewport } ->
+                    Resize
+                        (Pixels.int (round viewport.width))
+                        (Pixels.int (round viewport.height))
+                )
+        , Material.load "/static/level3.jpg"
             |> Task.attempt GotColorTexture
         , Material.load "/static/level3_normal.jpg"
             |> Task.attempt GotRoughnessTexture
@@ -92,8 +112,8 @@ init =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update message model =
     let
-        updatedModel =
-            case model of
+        updatedTextures =
+            case model.textures of
                 Loading textures ->
                     case message of
                         GotColorTexture (Ok colorTexture) ->
@@ -114,26 +134,11 @@ update message model =
                         GotMetallicTexture (Err _) ->
                             Errored "Error loading metallic texture"
 
-                        MouseDown ->
-                            model
-
-                        MouseUp ->
-                            model
-
-                        MouseMove _ _ ->
-                            model
+                        _ ->
+                            model.textures
 
                 Loaded loadedModel ->
                     case message of
-                        GotColorTexture _ ->
-                            model
-
-                        GotRoughnessTexture _ ->
-                            model
-
-                        GotMetallicTexture _ ->
-                            model
-
                         MouseDown ->
                             Loaded { loadedModel | orbiting = True }
 
@@ -176,15 +181,23 @@ update message model =
                                         Loaded { loadedModel | sphereFrame = newFrame }
 
                                     Nothing ->
-                                        model
+                                        model.textures
 
                             else
-                                model
+                                model.textures
+
+                        _ ->
+                            model.textures
 
                 Errored _ ->
-                    model
+                    model.textures
     in
-    ( updatedModel, Cmd.none )
+    case message of
+        Resize width height ->
+            ( { model | width = width, height = height }, Cmd.none )
+
+        _ ->
+            ( { model | textures = updatedTextures }, Cmd.none )
 
 
 {-| Every time a texture gets returned from an HTTP request, one of the Maybe
@@ -198,7 +211,7 @@ checkIfLoaded :
     , roughnessTexture : Maybe (Material.Texture Float)
     , metallicTexture : Maybe (Material.Texture Float)
     }
-    -> Model
+    -> Textures
 checkIfLoaded textures =
     case ( textures.colorTexture, textures.roughnessTexture, textures.metallicTexture ) of
         ( Just colorTexture, Just roughnessTexture, Just metallicTexture ) ->
@@ -272,8 +285,8 @@ sphere =
 
 
 view : Model -> Html msg
-view model =
-    case model of
+view { width, height, textures } =
+    case textures of
         Loaded { colorTexture, roughnessTexture, metallicTexture, sphereFrame } ->
             let
                 -- Create a fully textured PBR material from the three loaded
@@ -290,7 +303,7 @@ view model =
             Scene3d.custom
                 { camera = camera
                 , clipDepth = Length.centimeters 0.5
-                , dimensions = ( Pixels.int 800, Pixels.int 800 )
+                , dimensions = ( width, height )
                 , antialiasing = Scene3d.multisampling
                 , lights = Scene3d.threeLights sunlight sky environment
                 , exposure = Scene3d.exposureValue 11
@@ -321,8 +334,8 @@ decodeMouseMove =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
-    case model of
+subscriptions { textures } =
+    case textures of
         Loading _ ->
             Sub.none
 
